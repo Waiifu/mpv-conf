@@ -24,7 +24,7 @@ local cfg = {
 	interval = '15m',
 	format   = "%H:%M",
 	duration = 2.5,
-	key      = 'h',
+	key      = 'å',
 	name     = 'show-clock'
 }
 

@@ -60,6 +60,10 @@ local opts = {
     DOWN      = "DOWN",
     LEFT      = "LEFT",
     RIGHT     = "RIGHT",
+    K        = "k",
+    J      = "j",
+    L      = "l",
+    H     = "h",
     PAGE_UP   = "PGUP",
     PAGE_DOWN = "PGDWN",
     FIRST     = "HOME",
@@ -120,44 +124,49 @@ gallery.config.text_size = opts.text_size
 gallery.too_small = function()
     stop()
 end
-gallery.item_to_overlay_path = function(index, item)
-    local filename = item.filename
-    local filename_hash = hash_cache[filename]
-    if filename_hash == nil then
-        filename_hash = string.sub(sha256(normalize_path(filename)), 1, 12)
-        hash_cache[filename] = filename_hash
+function set_overlays()
+    gallery.item_to_overlay_path = function(index, item)
+        local filename = item.filename
+        local filename_hash = hash_cache[filename]
+        if filename_hash == nil then
+            filename_hash = string.sub(sha256(normalize_path(filename)), 1, 12)
+            hash_cache[filename] = filename_hash
+        end
+        local thumb_filename = string.format("%s_%d_%d", filename_hash, gallery.geometry.thumbnail_size[1], gallery.geometry.thumbnail_size[2])
+        return utils.join_path(opts.thumbs_dir, thumb_filename)
     end
-    local thumb_filename = string.format("%s_%d_%d", filename_hash, gallery.geometry.thumbnail_size[1], gallery.geometry.thumbnail_size[2])
-    return utils.join_path(opts.thumbs_dir, thumb_filename)
-end
-gallery.item_to_thumbnail_params = function(index, item)
-    return item.filename, opts.take_thumbnail_at
-end
-gallery.item_to_border = function(index, item)
-    local flagged = flags[item.filename]
-    local selected = index == gallery.selection
-    if not flagged and not selected then
-        return opts.normal_border_size, opts.normal_border_color
-    elseif flagged and selected then
-        return opts.selected_border_size, opts.selected_flagged_border_color
-    elseif flagged then
-        return opts.flagged_border_size, opts.flagged_border_color
-    elseif selected then
-        return opts.selected_border_size, opts.selected_border_color
+    gallery.item_to_thumbnail_params = function(index, item)
+        return item.filename, opts.take_thumbnail_at
     end
-end
-gallery.item_to_text = function(index, item)
-    if not opts.show_text or index ~= gallery.selection then return "", false end
-    local f
-    if opts.show_title and item.title then
-        f = item.title
-    else
-        f = item.filename
-        if opts.strip_directory then
-            if ON_WINDOWS then
-                f = string.match(f, "([^\\/]+)$") or f
-            else
-                f = string.match(f, "([^/]+)$") or f
+    gallery.item_to_border = function(index, item)
+        local flagged = flags[item.filename]
+        local selected = index == gallery.selection
+        if not flagged and not selected then
+            return opts.normal_border_size, opts.normal_border_color
+        elseif flagged and selected then
+            return opts.selected_border_size, opts.selected_flagged_border_color
+        elseif flagged then
+            return opts.flagged_border_size, opts.flagged_border_color
+        elseif selected then
+            return opts.selected_border_size, opts.selected_border_color
+        end
+    end
+    gallery.item_to_text = function(index, item)
+        if not opts.show_text or index ~= gallery.selection then return "", false end
+        local f
+        if opts.show_title and item.title then
+            f = item.title
+        else
+            f = item.filename
+            if opts.strip_directory then
+                if ON_WINDOWS then
+                    f = string.match(f, "([^\\/]+)$") or f
+                else
+                    f = string.match(f, "([^/]+)$") or f
+                end
+            end
+            if opts.strip_extension then
+                f = string.match(f, "(.+)%.[^.]+$") or f
             end
         end
         if opts.strip_extension then
@@ -166,6 +175,7 @@ gallery.item_to_text = function(index, item)
     end
     return f, true
 end
+set_overlays()
 
 do
     local function increment_func(increment, clamp)
@@ -175,9 +185,19 @@ do
             new = math.max(1, math.min(new, #gallery.items))
         end
         gallery.pending.selection = new
+        -- Booru-Modification
+        msg.info('New pos: ' .. new)
+        -- mp.set_property('shared-script-properties', 'galpos=' .. new)
+        playlistpos = mp.get_property_native("playlist-count")
+        mp.commandv('change-list', 'shared-script-properties', 'set', 'galpos=' .. new ..',playlist-len=' .. playlistpos)
+        -- Booru END
     end
 
     local bindings_repeat = {}
+        bindings_repeat[opts.K]        = function() increment_func(- gallery.geometry.columns, false) end
+        bindings_repeat[opts.J]      = function() increment_func(  gallery.geometry.columns, false) end
+        bindings_repeat[opts.H]      = function() increment_func(- 1, false) end
+        bindings_repeat[opts.L]     = function() increment_func(  1, false) end
         bindings_repeat[opts.UP]        = function() increment_func(- gallery.geometry.columns, false) end
         bindings_repeat[opts.DOWN]      = function() increment_func(  gallery.geometry.columns, false) end
         bindings_repeat[opts.LEFT]      = function() increment_func(- 1, false) end
@@ -241,7 +261,7 @@ do
     end
 end
 
-do
+function set_geometries()
     local geometry_functions = loadstring(string.format([[
     return {
     function(ww, wh, gx, gy, gw, gh, sw, sh, tw, th)
@@ -336,6 +356,7 @@ do
         end
     end
 end
+set_geometries()
 
 function normalize_path(path)
     if string.find(path, "://") then
@@ -493,6 +514,17 @@ if opts.start_on_mpv_startup then
     mp.observe_property("osd-width", "number", autostart)
 end
 
+function change_thumb_size(thumb_size)
+    opts.thumbnail_size = thumb_size
+    set_overlays()
+    set_geometries()
+    if gallery.active then
+        stop()
+        load_selection()
+        start()
+    end
+end
+
 -- workaround for mpv bug #6823
 mp.observe_property("playlist", "native", playlist_changed)
 
@@ -501,3 +533,5 @@ mp.add_key_binding(nil, "playlist-view-close", stop)
 mp.add_key_binding('g', "playlist-view-toggle", toggle)
 mp.add_key_binding(nil, "playlist-view-load-selection", load_selection)
 mp.add_key_binding(nil, "playlist-view-write-flag-file", write_flag_file)
+mp.add_key_binding(nil, "playlist-change-size", change_thumb_size)
+
